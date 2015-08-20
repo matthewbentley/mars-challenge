@@ -8,13 +8,15 @@
 import requests
 import websocket
 import json
+import os
 
 
+server = os.environ['SERVER_URL']
 # Global Variables
-team_name = 'TheShields'                        # The Name of the Team
-team_auth = ''                                  # The Team Authentication Tocken
-server_url = 'http://localhost:8000/api'   # URL of the SERVER API
-server_ws = 'ws://localhost:8000/ws'       # URL of the Sensors Websocket
+team_name = os.environ['TEAM_NAME']
+team_auth = os.environ['TEAM_AUTH']
+server_url = 'http://' + server + '/api'
+server_ws = 'ws://' + server + '/ws'
 
 
 # Server Method Calls ------------------------------------------------
@@ -94,7 +96,7 @@ def data_recording(parsed_json):
     print("\nData Recording: Saving Data row for persistence. Time: " + str(parsed_json['startedAt']))
 
 
-def team_strategy(parsed_json):
+def team_strategy(parsed_json, data):
     """
   Contains the Team's strategy.
   :param parsed_json: Readings from the Mars Sensors
@@ -105,17 +107,26 @@ def team_strategy(parsed_json):
 
     # Get the Team List
     teams_list = parsed_json['teams']
-    print(parsed_json)
+    flare = parsed_json['readings']['solarFlare']
 
     # Find this team
     for team in teams_list:
         if team['name'] == team_name:
-            if team['shield'] <> True and team['energy'] > 1:
+            if not team['shield'] and team['energy'] > data['threashold']:
                 # Check if Shield is up and shield energy is larger than 10%
                 print("\nGameMove: Team: {0} Action: Shield UP!| Energy: {1}".format(team_name, str(team['energy'])))
                 team_shield_up(team_name, team_auth)
+            elif team['shield'] and team['energy'] < data['threashold'] and not flare and team['life'] > 10:
+                team_shield_down(team_name, team_auth)
+            elif flare and team['energy'] > 0:
+                team_shield_up(team_name, team_auth)
+                if team['energy'] < 50:
+                    data['threashold'] = team['energy']
             else:
                print("\nTeam: {0} Action: None| Energy: {1}".format(team_name, str(team['energy'])))
+            if team['life'] < 10:
+                data['threashold'] = 0
+    print("threashold: " + str(data['threashold']))
 
 
 # Register the Team
@@ -125,6 +136,9 @@ team_auth = register_team(team_name)
 
 # Create the WebSocket for Listening
 ws = websocket.create_connection(server_ws)
+
+data = {}
+data['threashold'] = 50
 
 while True:
 
@@ -137,6 +151,12 @@ while True:
 
     parsed_json = json.loads(json_string)
 
+    team_names = [e['name'] for e in parsed_json['teams']]
+
+    if team_name not in team_names:
+        team_auth = register_team(team_name)
+
+
     # Check if the game has started
     print("Game Status: " + str(parsed_json['running']))
 
@@ -144,7 +164,7 @@ while True:
         print('Waiting for the Game Start')
     else:
         data_recording(parsed_json)
-        team_strategy(parsed_json)
+        team_strategy(parsed_json, data)
 
 ws.close()
 
